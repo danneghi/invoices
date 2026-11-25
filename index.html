@@ -589,8 +589,8 @@ label.fld > span, .fld-label {
   animation: slideup .25s ease;
 }
 @keyframes slideup {
-  from { transform: translateY(24px); opacity: 0.6; }
-  to { transform: none; opacity: 1; }
+  from { transform: translateY(24px); }
+  to { transform: none; }
 }
 .sheet-handle {
   width: 36px; height: 4px; border-radius: 2px;
@@ -648,6 +648,26 @@ label.fld > span, .fld-label {
   border-bottom: 1px solid var(--line);
 }
 .picker-row .sub { color: var(--text-dim); font-size: 13px; }
+.app.has-fab { padding-bottom: calc(var(--safe-b) + var(--tab-h) + 84px); }
+.fab {
+  position: fixed;
+  right: calc(16px + var(--safe-r));
+  bottom: calc(var(--tab-h) + var(--safe-b) + 16px);
+  z-index: 25;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: var(--orange);
+  color: #fff;
+  box-shadow: 0 10px 28px rgba(196, 81, 26, 0.4);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.fab svg { width: 28px; height: 28px; }
+.fab:active { transform: scale(0.96); }
+.add-client-bar { margin: 0 0 12px; }
+.new-client-btn { width: 100%; }
 @media (max-width: 640px) {
   #preview-wrap .inv-bottom {
     flex-direction: column;
@@ -988,21 +1008,23 @@ label.fld > span, .fld-label {
       if (ui.editorMode === 'preview') drawPreviewQr();
     } else {
       ui.editingId = ui.editingId && getDoc(ui.editingId) ? ui.editingId : null;
-      app.className = 'app';
+      app.className = 'app' + (ui.tab === 'clients' ? ' has-fab' : '');
       var body = '';
       if (ui.tab === 'clients') body = renderClients();
       else if (ui.tab === 'items') body = renderItems();
       else if (ui.tab === 'settings') body = renderSettings();
       else body = renderInvoices();
-      app.innerHTML = renderTopbar() + '<div class="page">' + body + '</div>' + renderTabbar();
+      var fab = ui.tab === 'clients' ? renderClientFab() : '';
+      app.innerHTML = renderTopbar() + '<div class="page">' + body + '</div>' + fab + renderTabbar();
     }
     if (ui.sheet) renderSheet();
   }
 
   function renderTopbar() {
     var title = ({ invoices: 'Invoices', clients: 'Clients', items: 'Items', settings: 'Settings' })[ui.tab] || 'Invoices';
+    var addLabel = ui.tab === 'clients' ? 'New client' : ui.tab === 'items' ? 'New item' : 'New invoice';
     var add = ui.tab === 'settings' ? '' :
-      '<button class="icon-btn accent" data-act="add" aria-label="Add">+</button>';
+      '<button class="icon-btn accent" data-act="add" aria-label="' + addLabel + '" title="' + addLabel + '">+</button>';
     return '<div class="topbar"><h1><span class="brand-mark" aria-hidden="true"></span>' + title + '</h1>' + add + '</div>';
   }
 
@@ -1058,6 +1080,14 @@ label.fld > span, .fld-label {
     return '<button class="chip' + (ui.filter === id ? ' active' : '') + '" data-act="filter" data-filter="' + id + '">' + label + '</button>';
   }
 
+  function plusIcon() {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+  }
+
+  function renderClientFab() {
+    return '<button class="fab" type="button" data-act="add-client" aria-label="New client" title="New client">' + plusIcon() + '</button>';
+  }
+
   function renderClients() {
     var q = (ui.search || '').trim().toLowerCase();
     var list = state.clients.filter(function (c) {
@@ -1066,9 +1096,10 @@ label.fld > span, .fld-label {
     });
     var html = '<div class="search">' + svgSearch() +
       '<input type="search" placeholder="Search clients" value="' + esc(ui.search || '') + '" data-role="search"></div>';
+    html += '<div class="add-client-bar"><button class="btn block new-client-btn" data-act="add-client">+ New client</button></div>';
     if (!state.clients.length) {
       return html + '<div class="empty"><h2>No clients yet</h2><p>Save a client to reuse their details on invoices.</p>' +
-        '<button class="btn" data-act="add">Add client</button></div>';
+        '<button class="btn" data-act="add-client">Add client</button></div>';
     }
     html += '<div class="list">';
     list.forEach(function (c) {
@@ -1410,11 +1441,11 @@ label.fld > span, .fld-label {
         '<button class="btn secondary block" data-act="close-sheet">Cancel</button>';
     } else if (sh.type === 'pick-client') {
       inner = '<h2>Clients</h2>' +
-        '<button class="menu-item" data-act="new-client-for-doc">+ New client</button>' +
+        '<button class="btn block new-client-btn" data-act="new-client-for-doc" style="margin-bottom:14px">+ New client</button>' +
         (state.clients.length ? state.clients.map(function (c) {
           return '<button class="picker-row" data-act="use-client" data-id="' + c.id + '"><div class="num">' + esc(c.name) +
             '</div><div class="sub">' + esc([c.email, c.phone].filter(Boolean).join(' · ')) + '</div></button>';
-        }).join('') : '<p class="hint">No saved clients yet.</p>');
+        }).join('') : '<p class="hint">No saved clients yet. Tap + New client to add one.</p>');
     } else if (sh.type === 'pick-item') {
       inner = '<h2>Saved items</h2>' +
         (state.items.length ? state.items.map(function (it) {
@@ -1674,6 +1705,10 @@ label.fld > span, .fld-label {
     }
     if (act === 'filter') { ui.filter = btn.getAttribute('data-filter'); render(); return; }
     if (act === 'add') { onAdd(); return; }
+    if (act === 'add-client') {
+      openSheet('client-form', { client: { name: '', email: '', phone: '', address: '' } });
+      return;
+    }
     if (act === 'close-sheet' || (act === 'backdrop' && ev.target === btn)) { closeSheet(); return; }
     if (act === 'create-doc') {
       var created = newDoc(btn.getAttribute('data-type'));
