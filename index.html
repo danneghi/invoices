@@ -856,7 +856,279 @@ label.fld > span, .fld-label {
     doc.updatedAt = new Date().toISOString();
   }
 
+
+  var IMPORT_2026_SOURCE = 'invoice-simple-2026';
+  var CLIENT_COVERALL = 'K-Bro Linen Systems Inc. (Coverall)';
+  var CLIENT_MAINTENANCE = 'K-Bro Linen Systems Inc. (Maintenance)';
+  var IMPORT_2026_INVOICES = [
+    { orig: 208, amount: 629.48, kind: 'paid', on: '2026-02-23', client: 'maintenance' },
+    { orig: 209, amount: 1404.38, kind: 'paid', on: '2026-02-23', client: 'maintenance' },
+    { orig: 210, amount: 294.00, kind: 'paid', on: '2026-02-23', client: 'coverall' },
+    { orig: 211, amount: 105.00, kind: 'paid', on: '2026-07-05', client: 'coverall' },
+    { orig: 212, amount: 2808.75, kind: 'paid', on: '2026-07-05', client: 'maintenance' },
+    { orig: 213, amount: 168.00, kind: 'paid', on: '2026-07-05', client: 'coverall' },
+    { orig: 214, amount: 2138.85, kind: 'paid', on: '2026-07-05', client: 'maintenance' },
+    { orig: 215, amount: 1830.94, kind: 'paid', on: '2026-07-05', client: 'maintenance' },
+    { orig: 216, amount: 531.04, kind: 'paid', on: '2026-07-05', client: 'maintenance' },
+    { orig: 217, amount: 189.00, kind: 'paid', on: '2026-07-05', client: 'coverall' },
+    { orig: 218, amount: 590.36, kind: 'paid', on: '2026-07-05', client: 'maintenance' },
+    { orig: 219, amount: 1246.61, kind: 'due', on: '2026-06-09', client: 'maintenance' },
+    { orig: 220, amount: 105.00, kind: 'paid', on: '2026-07-05', client: 'coverall' },
+    { orig: 221, amount: 210.00, kind: 'due', on: '2026-06-28', client: 'coverall' },
+    { orig: 222, amount: 879.11, kind: 'due', on: '2026-06-28', client: 'maintenance' },
+    { orig: 223, amount: 1928.85, kind: 'due', on: '2026-08-04', client: 'maintenance' },
+    { orig: 224, amount: 2093.18, kind: 'due', on: '2026-08-23', client: 'maintenance' },
+    { orig: 225, amount: 273.00, kind: 'due', on: '2026-10-09', client: 'coverall' },
+    { orig: 226, amount: 2401.35, kind: 'due', on: '2026-10-13', client: 'maintenance' },
+    { orig: 227, amount: 189.00, kind: 'due', on: '2026-10-26', client: 'coverall' },
+    { orig: 228, amount: 672.00, kind: 'due', on: '2026-11-02', client: 'maintenance' },
+    { orig: 229, amount: 1870.31, kind: 'due', on: '2026-11-16', client: 'maintenance' }
+  ];
+
+  function normalizeClientName(name) {
+    return String(name || '').replace(/['"“”‘’`]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+
+  function invoiceSequence(doc) {
+    if (!doc || doc.type === 'estimate') return null;
+    var prefix = state.settings.invoicePrefix || 'INV';
+    var n = String(doc.number || '');
+    if (n.indexOf(prefix) !== 0) return null;
+    var rest = n.slice(prefix.length);
+    if (!/^\d+$/.test(rest)) return null;
+    return parseInt(rest, 10);
+  }
+
+  function maxInvoiceSequence() {
+    var max = 0;
+    (state.docs || []).forEach(function (d) {
+      var n = invoiceSequence(d);
+      if (n != null && n > max) max = n;
+    });
+    return max;
+  }
+
+  function findClientByNormalizedName(name) {
+    var target = normalizeClientName(name);
+    return state.clients.find(function (c) {
+      return normalizeClientName(c.name) === target;
+    });
+  }
+
+  function ensureNamedClient(name) {
+    var found = findClientByNormalizedName(name);
+    if (found) return { client: found, created: false };
+    var client = { id: uid(), name: name, email: '', phone: '', address: '' };
+    state.clients.push(client);
+    return { client: client, created: true };
+  }
+
+  function ensureImportClients() {
+    var coverall = ensureNamedClient(CLIENT_COVERALL);
+    var maintenance = ensureNamedClient(CLIENT_MAINTENANCE);
+    return {
+      coverall: coverall.client,
+      maintenance: maintenance.client,
+      createdCoverall: coverall.created,
+      createdMaintenance: maintenance.created
+    };
+  }
+
+  function imported2026Totals() {
+    var paid = 0, outstanding = 0, count = 0;
+    var byClient = {};
+    function bucket(key) {
+      if (!byClient[key]) byClient[key] = { name: key, count: 0, paid: 0, outstanding: 0, total: 0 };
+      return byClient[key];
+    }
+    (state.docs || []).forEach(function (d) {
+      if (!d.importId || String(d.importId).indexOf('invoice-simple-2026-') !== 0) return;
+      count++;
+      var t = compute(d).total;
+      var isPaid = effectiveStatus(d) === 'paid';
+      if (isPaid) paid += t;
+      else outstanding += t;
+      var name = (d.billTo && d.billTo.name) || 'Unknown';
+      var b = bucket(name);
+      b.count++;
+      if (isPaid) b.paid += t;
+      else b.outstanding += t;
+      b.total += t;
+    });
+    Object.keys(byClient).forEach(function (k) {
+      var b = byClient[k];
+      b.paid = Math.round(b.paid * 100) / 100;
+      b.outstanding = Math.round(b.outstanding * 100) / 100;
+      b.total = Math.round(b.total * 100) / 100;
+    });
+    return {
+      count: count,
+      paid: Math.round(paid * 100) / 100,
+      outstanding: Math.round(outstanding * 100) / 100,
+      total: Math.round((paid + outstanding) * 100) / 100,
+      cents: Math.round(paid * 100) + Math.round(outstanding * 100),
+      byClient: byClient
+    };
+  }
+
+  function import2026History() {
+    var prefix = state.settings.invoicePrefix || 'INV';
+    var dueDays = Number(state.settings.defaultDueDays);
+    if (!isFinite(dueDays) || dueDays < 0) dueDays = 30;
+
+    var clients = ensureImportClients();
+
+    var already = {};
+    state.docs.forEach(function (d) {
+      if (d.importId && String(d.importId).indexOf('invoice-simple-2026-') === 0) {
+        already[d.importId] = d;
+      }
+    });
+
+    var reserved = {};
+    IMPORT_2026_INVOICES.forEach(function (row, i) {
+      reserved[formatNumber(prefix, i + 1)] = true;
+    });
+
+    var needed = IMPORT_2026_INVOICES.some(function (row) {
+      return !already['invoice-simple-2026-' + row.orig];
+    });
+
+    var renumbered = [];
+    if (needed) {
+      var collisions = state.docs.filter(function (d) {
+        if (d.type === 'estimate') return false;
+        if (d.importId && already[d.importId]) return false;
+        return !!reserved[d.number];
+      });
+      collisions.sort(function (a, b) {
+        return (invoiceSequence(a) || 0) - (invoiceSequence(b) || 0);
+      });
+      var nextNum = Math.max(22, maxInvoiceSequence()) + 1;
+      collisions.forEach(function (d) {
+        var from = d.number;
+        var to = formatNumber(prefix, nextNum);
+        d.number = to;
+        pushHistory(d, 'Renumbered from ' + from + ' so imported 2026 invoices could use ' + from);
+        renumbered.push({ from: from, to: to });
+        nextNum++;
+      });
+    }
+
+    var added = [];
+    IMPORT_2026_INVOICES.forEach(function (row, i) {
+      var importId = 'invoice-simple-2026-' + row.orig;
+      if (already[importId]) return;
+      var origLabel = 'INV' + String(row.orig).padStart(4, '0');
+      var date, dueDate, paidDate, status;
+      if (row.kind === 'paid') {
+        date = row.on;
+        paidDate = row.on;
+        dueDate = row.on;
+        status = 'paid';
+      } else {
+        dueDate = row.on;
+        date = addDays(dueDate, -dueDays);
+        paidDate = '';
+        status = 'sent';
+      }
+      var now = new Date().toISOString();
+      var client = row.client === 'coverall' ? clients.coverall : clients.maintenance;
+      added.push({
+        id: uid(),
+        type: 'invoice',
+        number: formatNumber(prefix, i + 1),
+        date: date,
+        dueDate: dueDate,
+        clientId: client.id,
+        billTo: {
+          name: client.name,
+          email: client.email || '',
+          phone: client.phone || '',
+          address: client.address || ''
+        },
+        lines: [{ id: uid(), description: 'Services', qty: 1, rate: row.amount }],
+        discountType: 'amount',
+        discount: 0,
+        taxRate: 0,
+        taxLabel: state.settings.taxLabel || 'GST',
+        notes: 'Imported from Invoice Simple (orig #' + origLabel + ')',
+        status: status,
+        paidDate: paidDate,
+        createdAt: now,
+        updatedAt: now,
+        history: [{ at: now, action: 'Imported from Invoice Simple (orig #' + origLabel + ')' }],
+        importId: importId,
+        importedFrom: IMPORT_2026_SOURCE
+      });
+    });
+
+    if (added.length) {
+      state.docs = added.slice().reverse().concat(state.docs);
+    }
+
+    var seqMax = maxInvoiceSequence();
+    var curNext = Number(state.settings.nextInvoiceNumber) || 1;
+    state.settings.nextInvoiceNumber = Math.max(curNext, 23, seqMax + 1);
+    save();
+
+    var totals = imported2026Totals();
+    return {
+      added: added.length,
+      skipped: IMPORT_2026_INVOICES.length - added.length,
+      createdCoverall: clients.createdCoverall,
+      createdMaintenance: clients.createdMaintenance,
+      renumbered: renumbered,
+      totals: totals
+    };
+  }
+
+  function openImport2026Confirm() {
+    var existing = imported2026Totals().count;
+    var body = existing >= 22
+      ? 'The 22 invoices from Invoice Simple are already in this app. Import again? Nothing already imported will be duplicated, and your business profile, logo, and other clients will not change.'
+      : 'This adds 22 invoices numbered INV0001–INV0022, split between K-Bro Linen Systems Inc. (Maintenance) and K-Bro Linen Systems Inc. (Coverall). Your business profile, logo, and other clients will not change. Amounts are the final totals (no extra tax is added).';
+    openSheet('confirm', {
+      title: existing >= 22 ? 'Import 2026 history again?' : 'Import 2026 history (22 invoices)?',
+      body: body,
+      ok: 'Import invoices',
+      danger: false,
+      fn: function () {
+        closeSheet();
+        var result = import2026History();
+        ui.editingId = null;
+        ui.tab = 'invoices';
+        ui.filter = 'all';
+        render();
+        var msg;
+        if (result.added === 0) {
+          msg = 'All 22 invoices are already in the app.';
+        } else {
+          msg = 'Imported ' + result.added + ' invoice' + (result.added === 1 ? '' : 's') + '.';
+          if (result.renumbered.length) {
+            msg += ' ' + result.renumbered.length + ' existing invoice' + (result.renumbered.length === 1 ? ' was' : 's were') + ' renumbered: ' +
+              result.renumbered.map(function (r) { return r.from + ' → ' + r.to; }).join(', ') + '.';
+          }
+        }
+        toast(msg);
+        try {
+          if (/\bimport=2026\b/.test(location.search) && window.history && history.replaceState) {
+            history.replaceState({}, '', location.pathname + location.hash);
+          }
+        } catch (e) {}
+      }
+    });
+  }
+
+  function maybePromptImport2026() {
+    try {
+      var q = new URLSearchParams(location.search || '');
+      if (q.get('import') === '2026') openImport2026Confirm();
+    } catch (e) {}
+  }
+
   function newDoc(type) {
+
     var date = todayISO();
     var due = addDays(date, state.settings.defaultDueDays || 30);
     var doc = {
@@ -1167,6 +1439,10 @@ label.fld > span, .fld-label {
         '<div class="row-2">' + field('Estimate prefix', 'settings.estimatePrefix', s.estimatePrefix, 'text') +
         field('Next estimate #', 'settings.nextEstimateNumber', s.nextEstimateNumber, 'number') + '</div>' +
       '</div>' +
+      '<div class="settings-card"><h2>2026 invoice history</h2>' +
+        '<p class="hint" style="margin-top:0">Add 22 invoices from Invoice Simple, numbered INV0001–INV0022, split between K-Bro Linen Systems Inc. (Maintenance) and K-Bro Linen Systems Inc. (Coverall). Your business profile, logo, and other clients are left as they are.</p>' +
+        '<button class="btn block" data-act="import-2026">Import 2026 history (22 invoices)</button>' +
+      '</div>' +
       '<div class="settings-card"><h2>Backup</h2>' +
         '<p class="hint" style="margin-top:0">Your invoices are saved only on this phone. Export a backup JSON file, and import it to restore or copy them to another device.</p>' +
         '<button class="btn secondary block" data-act="export-json" style="margin-bottom:8px">Export backup</button>' +
@@ -1285,7 +1561,7 @@ label.fld > span, .fld-label {
     var taxLabel = (doc.taxLabel || state.settings.taxLabel || 'GST') + ' (' + t.rate + '%)';
     return '<div class="trow"><span>Subtotal</span><span>' + esc(money(t.subtotal)) + '</span></div>' +
       (t.discount ? '<div class="trow"><span>' + esc(discLabel) + '</span><span>−' + esc(money(t.discount)) + '</span></div>' : '') +
-      '<div class="trow"><span>' + esc(taxLabel) + '</span><span>' + esc(money(t.tax)) + '</span></div>' +
+      (t.rate ? '<div class="trow"><span>' + esc(taxLabel) + '</span><span>' + esc(money(t.tax)) + '</span></div>' : '') +
       '<div class="trow grand"><span>Total</span><span>' + esc(money(t.total)) + '</span></div>';
   }
 
@@ -1357,7 +1633,7 @@ label.fld > span, .fld-label {
       '<div class="inv-bottom"><div class="inv-notes">' + notes + pay + '</div>' +
         '<div class="inv-totals">' +
           '<div class="trow"><span>Subtotal</span><span>' + esc(money(t.subtotal)) + '</span></div>' + discRow +
-          '<div class="trow"><span>' + esc((doc.taxLabel || s.taxLabel || 'GST') + ' (' + t.rate + '%)') + '</span><span>' + esc(money(t.tax)) + '</span></div>' +
+          (t.rate ? '<div class="trow"><span>' + esc((doc.taxLabel || s.taxLabel || 'GST') + ' (' + t.rate + '%)') + '</span><span>' + esc(money(t.tax)) + '</span></div>' : '') +
           '<div class="trow grand"><span>Total</span><span>' + esc(money(t.total)) + '</span></div>' +
         '</div></div>' +
       '<div class="inv-foot"><span>' + esc(gst) + '</span><span>' + esc(s.businessName ? 'Thank you for your business.' : '') + '</span></div>' +
@@ -1973,6 +2249,10 @@ label.fld > span, .fld-label {
       if (imp) imp.click();
       return;
     }
+    if (act === 'import-2026') {
+      openImport2026Confirm();
+      return;
+    }
   }
 
   function onClick(ev) {
@@ -2074,6 +2354,7 @@ label.fld > span, .fld-label {
   state = load();
   ui = { tab: 'invoices', filter: 'outstanding', editingId: null, editorMode: 'edit', search: '', sheet: null };
   render();
+  maybePromptImport2026();
 
   window.__INVOICES_TEST__ = {
     getState: function () { return state; },
@@ -2089,7 +2370,12 @@ label.fld > span, .fld-label {
     effectiveStatus: effectiveStatus,
     todayISO: todayISO,
     ui: ui,
-    KEY: KEY
+    KEY: KEY,
+    import2026History: import2026History,
+    openImport2026Confirm: openImport2026Confirm,
+    imported2026Totals: imported2026Totals,
+    normalizeClientName: normalizeClientName,
+    IMPORT_2026_INVOICES: IMPORT_2026_INVOICES
   };
 })();
 
